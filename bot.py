@@ -61,5 +61,15 @@ async def check_mail(message: types.Message):
     except:
         await message.reply("Format: /check email@domain.com")
 
-if __name__ == '__main__':
-    executor.start_polling(dp, skip_updates=True)
+# executor.start_polling(dp, skip_updates=True) # Ise hata dein
+
+# Iski jagah Webhook setup karein (FastAPI ke saath):
+from aiogram import Bot, Dispatcher
+
+# ... (baaki code)
+
+# bot.py ke last mein
+if __name__ == "__main__":
+    import uvicorn
+    # Port ko 8080 set karein
+    uvicorn.run(app, host="0.0.0.0", port=8080)
