@@ -1,62 +1,65 @@
 import logging
-from aiogram import Bot, Dispatcher, types
-from aiogram.utils import executor
-import random
 import sqlite3
+import requests
+import os
+from aiogram import Bot, Dispatcher, executor, types
 
-# --- CONFIG ---
-API_TOKEN = '8863248333:AAHCxCfU3P6JNY2Dlh6dEB_m8WqwC91lQLg'
-ADMIN_ID = 7422190601  # Aapki Chat ID
-DOMAINS = ["sudiphub.com", "sudip.pro"]
-INDIAN_NAMES = ["arjun", "priya", "rohan", "sneha", "vikram", "anjali", "amit", "pooja"]
+# Token direct variable se le raha hai
+API_TOKEN = '8863248333:AAHCxCfU3P6JNY2Dlh6dEB_m8WqwC91lQLg' 
+ADMIN_ID = 7422190601
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 
-# --- DATABASE ---
+# Database Setup
 conn = sqlite3.connect('users.db', check_same_thread=False)
 cursor = conn.cursor()
-cursor.execute('CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, balance INTEGER DEFAULT 0)')
+cursor.execute('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, balance INTEGER)')
 conn.commit()
 
-# --- COMMANDS ---
+# Commands
 @dp.message_handler(commands=['start'])
 async def start(message: types.Message):
-    user_id = message.from_user.id
-    cursor.execute('INSERT OR IGNORE INTO users (user_id, balance) VALUES (?, 0)', (user_id,))
+    cursor.execute('INSERT OR IGNORE INTO users (id, balance) VALUES (?, ?)', (message.from_user.id, 0))
     conn.commit()
-    cursor.execute('SELECT balance FROM users WHERE user_id = ?', (user_id,))
-    balance = cursor.fetchone()[0]
-    await message.reply(f"Welcome! Aapka current balance: {balance} credits.\nCommands: /generate, /pay")
+    await message.reply("Welcome! Use /generate (costs 1 credit) or /check.")
+
+@dp.message_handler(commands=['add'])
+async def add_credits(message: types.Message):
+    if message.from_user.id == ADMIN_ID:
+        args = message.text.split()
+        user_id, amount = int(args[1]), int(args[2])
+        cursor.execute('UPDATE users SET balance = balance + ? WHERE id = ?', (amount, user_id))
+        conn.commit()
+        await message.reply(f"User {user_id} ko {amount} credits add kar diye.")
 
 @dp.message_handler(commands=['generate'])
 async def generate(message: types.Message):
-    user_id = message.from_user.id
-    cursor.execute('SELECT balance FROM users WHERE user_id = ?', (user_id,))
+    cursor.execute('SELECT balance FROM users WHERE id = ?', (message.from_user.id,))
     data = cursor.fetchone()
-    balance = data[0] if data else 0
-    
-    if balance < 10:
-        await message.reply("Balance kam hai! /pay karke points add karwayein.")
+    if data and data[0] > 0:
+        url = "https://www.1secmail.com/api/v1/?action=genRandomMailbox&count=1"
+        email = requests.get(url).json()[0]
+        cursor.execute('UPDATE users SET balance = balance - 1 WHERE id = ?', (message.from_user.id,))
+        conn.commit()
+        await message.reply(f"Generated: `{email}`\nMail check karne ke liye: /check {email}")
     else:
-        cursor.execute('UPDATE users SET balance = balance - 10 WHERE user_id = ?', (user_id,))
-        conn.commit()
-        email = f"{random.choice(INDIAN_NAMES)}{random.randint(100, 999)}@{random.choice(DOMAINS)}"
-        await message.reply(f"Generated Email: `{email}`\nRemaining: {balance - 10}", parse_mode="Markdown")
+        await message.reply("Balance nahi hai!")
 
-@dp.message_handler(commands=['pay'])
-async def pay(message: types.Message):
-    await message.reply("UPI: `paytm.s17yd0l@pty`\n100 Rs = 100 Credits.\nPayment karke screenshot Admin ko bhejein.")
-
-@dp.message_handler(commands=['add'])
-async def add_credit(message: types.Message):
-    if message.from_user.id != ADMIN_ID:
-        return await message.reply("Ye command sirf Admin ke liye hai.")
-    args = message.get_args().split()
-    if len(args) == 2:
-        cursor.execute('UPDATE users SET balance = balance + ? WHERE user_id = ?', (int(args[1]), int(args[0])))
-        conn.commit()
-        await message.reply(f"User {args[0]} ko {args[1]} credits add kar diye.")
+@dp.message_handler(commands=['check'])
+async def check_mail(message: types.Message):
+    try:
+        email = message.text.split()[1]
+        user, domain = email.split('@')
+        url = f"https://www.1secmail.com/api/v1/?action=getMessages&login={user}&domain={domain}"
+        messages = requests.get(url).json()
+        if not messages:
+            await message.reply("Inbox khali hai.")
+        else:
+            for msg in messages:
+                await message.reply(f"Mail mila!\nFrom: {msg['from']}\nSubject: {msg['subject']}")
+    except:
+        await message.reply("Format: /check email@domain.com")
 
 if __name__ == '__main__':
     executor.start_polling(dp, skip_updates=True)
